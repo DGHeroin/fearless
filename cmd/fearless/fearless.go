@@ -122,7 +122,7 @@ func main()  {
             } else { // 作为客户端, 不自动生成tls文件
                 log.Println("client not found TLS files")
                 // 连接到远程获取tls文件
-                req, err := http.NewRequest(http.MethodGet, *httpAddress, bytes.NewBufferString(*httpToken))
+                req, err := http.NewRequest(http.MethodPost, *httpAddress, bytes.NewBufferString(*httpToken))
                 if !checkErr(err) { return }
                 resp, err := http.DefaultClient.Do(req)
                 if resp != nil {
