@@ -10,9 +10,22 @@ import (
 )
 
 func handleFearlessRequest(conn net.Conn) {
-    log.Printf("socks connect from %s\n", conn.RemoteAddr().String())
-    var err error = nil
-    var hasError = false
+    var (
+        err             error = nil
+        hasError              = false
+        readBytesCount  uint64 // 发送流量统计
+        writeBytesCount uint64 // 接收流量统计
+        addr            string // 连接远程的地址
+        localAddr       string
+    )
+    defer func() {
+        if e := recover(); e != nil {
+            log.Error(e)
+        }
+        log.Infof("连接统计(%v<=>%v): 发送: %v 接收: %v", localAddr, addr, bytesCount(readBytesCount), bytesCount(writeBytesCount))
+    }()
+    localAddr = conn.RemoteAddr().String()
+    //log.Printf("socks connect from %s\n", localAddr)
     for {
         var _ int
         buf := make([]byte, 1)
@@ -22,7 +35,6 @@ func handleFearlessRequest(conn net.Conn) {
             break
         }
         addrType := buf[0]
-        var addr string
         var port int16
         if addrType == 1 {
             buf = make([]byte, 6)
@@ -31,7 +43,7 @@ func handleFearlessRequest(conn net.Conn) {
                 hasError = true
                 break
             }
-            var addrIp net.IP = make(net.IP, 4)
+            var addrIp = make(net.IP, 4)
             copy(addrIp, buf[0:4])
             addr = addrIp.String()
             sb := bytes.NewBuffer(buf[4:6])
@@ -47,7 +59,7 @@ func handleFearlessRequest(conn net.Conn) {
                 break
             }
             addrLen := buf[0]
-            buf = make([]byte, addrLen + 2)
+            buf = make([]byte, addrLen+2)
             _, err = conn.Read(buf)
             if err != nil {
                 hasError = true
@@ -55,7 +67,7 @@ func handleFearlessRequest(conn net.Conn) {
             }
             sb := bytes.NewBuffer(buf[0:addrLen])
             addr = sb.String()
-            sb = bytes.NewBuffer(buf[addrLen:addrLen + 2])
+            sb = bytes.NewBuffer(buf[addrLen : addrLen+2])
             err = binary.Read(sb, binary.BigEndian, &port)
             if err != nil {
                 log.Errorf("%v\n", err)
@@ -63,7 +75,7 @@ func handleFearlessRequest(conn net.Conn) {
             }
         } else {
             hasError = true
-            log.Println("unsurpported addr type")
+            log.Println("unsupported addr type")
             break
         }
         log.Println("connecting ", addr)
@@ -78,8 +90,8 @@ func handleFearlessRequest(conn net.Conn) {
             break
         }
         c := make(chan int, 2)
-        go PipeTLS(conn, remote, c)
-        go PipeTLS(remote, conn, c)
+        go PipeTLS(conn, remote, c, &readBytesCount)
+        go PipeTLS(remote, conn, c, &writeBytesCount)
         <-c // close the other connection whenever one connection is closed
         err = conn.Close()
         err1 := remote.Close()
@@ -127,4 +139,3 @@ func RunServer(port int, ca, pem, key []byte) {
         go handleFearlessRequest(conn)
     }
 }
-

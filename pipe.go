@@ -3,13 +3,18 @@ package fearless
 import (
     "io"
     "net"
+    "sync/atomic"
 )
 
-func PipeTLS(src net.Conn, dst net.Conn, end chan int) {
+func PipeTLS(src net.Conn, dst net.Conn, end chan int, bytesCount *uint64) {
+    if bytesCount == nil {
+        bytesCount = new(uint64)
+    }
     buf := make([]byte, 4096)
     for {
         num, err := src.Read(buf)
         if err == nil {
+            atomic.AddUint64(bytesCount, uint64(num))
             _, err := dst.Write( buf[0:num])
             if err != nil {
                 //log.Println("write:", err)
