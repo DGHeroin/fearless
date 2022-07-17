@@ -192,11 +192,14 @@ func handleClientRequest(client net.Conn, socks5Addr string) {
     }
     data := b[:n]
     content := string(data)
-    if !strings.HasPrefix(content, "CONNECT") {
-        log.Printf("not support: %v", content)
-        return
+    if strings.HasPrefix(content, "CONNECT") {
+        // https
+        // log.Printf("not support: %v", content)
+        // return
+    } else {
+        // normal
     }
-    log.Printf("http proxying: %v", content)
+    // log.Printf("http proxying: %v", content)
 
     var method, host, address string
     _, err = fmt.Sscanf(content, "%s%s", &method, &host)
