@@ -5,23 +5,42 @@ import (
     "encoding/json"
     "flag"
     "github.com/DGHeroin/fearless"
-    log "github.com/sirupsen/logrus"
     "io/ioutil"
+    "log"
     "net/http"
     "os"
 )
 
+type Config struct {
+}
+
+func init() {
+    log.SetFlags(log.LstdFlags | log.Lshortfile)
+    flag.StringVar(&ca, "ca", "", "ca file path")
+    flag.StringVar(&cert, "cert", "", "cert file path")
+    flag.StringVar(&key, "key", "", "key file path")
+    flag.BoolVar(&isServer, "s", false, "当做服务器运行")
+    flag.StringVar(&socks5LocalPort, "port", ":11080", "本地 Sock5 Proxy 服务地址")
+    flag.StringVar(&httpLocalPort, "httpPort", ":11081", "本地 HTTP Proxy 服务地址")
+    flag.StringVar(&remote, "remote", "127.0.0.1:18089", "服务地址")
+    flag.BoolVar(&auto, "auto", true, "auto config")
+    flag.StringVar(&httpToken, "token", "kungfu", "key share token")
+    flag.StringVar(&httpAddress, "http", ":18089", "http share address")
+
+    flag.Parse()
+}
+
 var (
-    ca              = flag.String("ca", "", "ca file path")
-    cert            = flag.String("cert", "", "cert file path")
-    key             = flag.String("key", "", "key file path")
-    isServer        = flag.Bool("s", false, "run as fearless server")
-    socks5LocalPort = flag.Int("port", 0, "listen socks5 local port")
-    httpLocalPort   = flag.Int("httpPort", 0, "listen HTTP local port")
-    remote          = flag.String("remote", "", "remote server address")
-    auto            = flag.Bool("auto", true, "auto config")
-    httpToken       = flag.String("token", "kungfu", "key share token")
-    httpAddress     = flag.String("http", ":8089", "http share address")
+    ca              string
+    cert            string
+    key             string
+    isServer        bool
+    socks5LocalPort string
+    httpLocalPort   string
+    remote          string
+    auto            bool
+    httpToken       string
+    httpAddress     string
 )
 
 func readTLS(ca, cert, key string) (caBytes, certBytes, keyBytes []byte, err error) {
@@ -53,18 +72,18 @@ type TLSJson struct {
     CA   []byte
     Cert []byte
     Key  []byte
-    Port int
+    Port string
 }
 
 func main() {
-    flag.Parse()
+
     var (
         caBytes, certBytes, keyBytes []byte
         err                          error
     )
 
-    if !*auto { // 手动指定证书
-        caBytes, certBytes, keyBytes, err = readTLS(*ca, *cert, *key)
+    if !auto { // 手动指定证书
+        caBytes, certBytes, keyBytes, err = readTLS(ca, cert, key)
         if err != nil {
             log.Println(err)
             return
@@ -75,7 +94,7 @@ func main() {
             ".tls/client.key", ".tls/client.cert",
         }
         var serverFiels = []string{".tls/ca.key",
-            ".tls/server.key", ".tls/server.cert",}
+            ".tls/server.key", ".tls/server.cert"}
         // 检查文件是否存在
         var passCheck = true
         for _, file := range files {
@@ -85,7 +104,7 @@ func main() {
                 break
             }
         }
-        if *isServer {
+        if isServer {
             for _, file := range serverFiels {
                 _, err := os.Stat(file)
                 if err != nil && os.IsNotExist(err) {
@@ -101,7 +120,7 @@ func main() {
                 log.Println(err)
                 return
             }
-            if *isServer {
+            if isServer {
                 caCert, caKey, err := fearless.GenerateTLSCa()
                 if !checkErr(err) {
                     return
@@ -147,7 +166,7 @@ func main() {
             } else { // 作为客户端, 不自动生成tls文件
                 log.Println("client not found TLS files")
                 // 连接到远程获取tls文件
-                req, err := http.NewRequest(http.MethodPost, *httpAddress, bytes.NewBufferString(*httpToken))
+                req, err := http.NewRequest(http.MethodPost, httpAddress+"/key", bytes.NewBufferString(httpToken))
                 if !checkErr(err) {
                     return
                 }
@@ -170,7 +189,7 @@ func main() {
                 caBytes = info.CA
                 certBytes = info.Cert
                 keyBytes = info.Key
-                *socks5LocalPort = info.Port
+                socks5LocalPort = info.Port
                 // 写文件
                 err = ioutil.WriteFile(".tls/ca.cert", caBytes, perm)
                 if !checkErr(err) {
@@ -193,7 +212,7 @@ func main() {
             if !checkErr(err) {
                 return
             }
-            if *isServer {
+            if isServer {
                 certBytes, err = ioutil.ReadFile(".tls/server.cert")
                 if !checkErr(err) {
                     return
@@ -215,9 +234,9 @@ func main() {
         }
     }
 
-    if *isServer {
+    if isServer {
         go func() { // 启动秘钥共享http服务器
-            http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+            http.HandleFunc("/key", func(w http.ResponseWriter, r *http.Request) {
                 body, err := ioutil.ReadAll(r.Body)
                 if err != nil {
                     return
@@ -227,14 +246,14 @@ func main() {
                     return
                 }
 
-                if string(body) != *httpToken {
+                if string(body) != httpToken {
                     w.WriteHeader(http.StatusForbidden)
                 } else { // 通过验证
                     resp := &TLSJson{
                         CA:   caBytes,
                         Cert: certBytes,
                         Key:  keyBytes,
-                        Port: *socks5LocalPort,
+                        Port: socks5LocalPort,
                     }
                     data, err := json.Marshal(resp)
                     if err != nil {
@@ -248,14 +267,16 @@ func main() {
                     }
                 }
             })
-            log.Println("run http server:", *httpAddress)
-            if err := http.ListenAndServe(*httpAddress, nil); err != nil {
+            log.Println("API地址:", httpAddress)
+            if err := http.ListenAndServe(httpAddress, nil); err != nil {
                 log.Println(err)
             }
         }()
-        fearless.RunServer(*socks5LocalPort, caBytes, certBytes, keyBytes)
+
+        fearless.RunServer(socks5LocalPort, caBytes, certBytes, keyBytes)
     } else {
-        go fearless.HTTPToSocks5(*httpLocalPort, *socks5LocalPort) // 接收 HTTP 代理请求, 并将其转换到socks
-        fearless.RunLocal(*socks5LocalPort, *remote, caBytes, certBytes, keyBytes)
+        go fearless.HTTPToSocks5(httpLocalPort, socks5LocalPort) // 接收 HTTP 代理请求, 并将其转换到socks
+        log.Println("服务地址:", remote)
+        fearless.RunLocal(socks5LocalPort, remote, caBytes, certBytes, keyBytes)
     }
 }

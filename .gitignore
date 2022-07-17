@@ -1,2 +1,4 @@
 cmd/fearless/.tls
 cmd/fearless/out
+.idea/
+.tls/

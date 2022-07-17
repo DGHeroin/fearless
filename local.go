@@ -4,9 +4,9 @@ import (
     "bytes"
     "crypto/tls"
     "fmt"
-    log "github.com/sirupsen/logrus"
     "golang.org/x/net/proxy"
     "io"
+    "log"
     "net"
     "net/url"
     "strings"
@@ -39,19 +39,19 @@ func bytesCount(n uint64) string {
 
 func handleSocks5Request(conn net.Conn, server string, ca, pem, key []byte) {
     var (
-        err             error = nil
-        hasError              = false
+        err             error  = nil
+        hasError               = false
         readBytesCount  uint64 // 发送流量统计
         writeBytesCount uint64 // 接收流量统计
         addr            string // 连接远程的地址
         localAddr       string // 本地地址
-        addrToSend []byte
+        addrToSend      []byte
     )
     defer func() {
         if e := recover(); e != nil {
-            log.Error(e)
+            log.Println(e)
         }
-        log.Infof("连接统计(%v<=>%v): 发送: %v 接收: %v", localAddr, addr, bytesCount(readBytesCount), bytesCount(writeBytesCount))
+        log.Printf("连接统计(%v<=>%v): 发送: %v 接收: %v", localAddr, addr, bytesCount(readBytesCount), bytesCount(writeBytesCount))
     }()
     localAddr = conn.RemoteAddr().String()
     b := make([]byte, 262)
@@ -65,7 +65,7 @@ func handleSocks5Request(conn net.Conn, server string, ca, pem, key []byte) {
         }
         _, err = conn.Write([]byte{0x05, 0x00})
         if err != nil {
-            log.Errorf("%v\n", err)
+            log.Printf("%v\n", err)
             break
         }
         _, err = conn.Read(buf)
@@ -91,14 +91,14 @@ func handleSocks5Request(conn net.Conn, server string, ca, pem, key []byte) {
             log.Println("unsupported addr type")
             break
         }
-        log.Println("connecting ", addr)
+        log.Println("connecting ", server, " => ", addr)
         _, err = conn.Write([]byte{0x05, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x08, 0x43})
         if err != nil {
-            log.Errorf("%v\n", err)
+            log.Printf("%v\n", err)
             break
         }
         var remote net.Conn
-        //remote, err = net.Dial("tcp", server)
+        // remote, err = net.Dial("tcp", server)
         config, err := ReadClientTLS(ca, pem, key)
         if err != nil {
             log.Println(err)
@@ -140,13 +140,13 @@ func handleSocks5Request(conn net.Conn, server string, ca, pem, key []byte) {
     }
 }
 
-func RunLocal(port int, server string, ca, pem, key []byte) {
-    ln, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
+func RunLocal(address string, server string, ca, pem, key []byte) {
+    ln, err := net.Listen("tcp", address)
     if err != nil {
         log.Println(err)
         return
     }
-    log.Printf("starting socks5 proxy at port %v ...\n", ln.Addr().String())
+    log.Printf("本地Sock5地址: %v\n", ln.Addr().String())
     for {
         conn, err := ln.Accept()
         if err != nil {
@@ -157,23 +157,23 @@ func RunLocal(port int, server string, ca, pem, key []byte) {
     }
 }
 
-func HTTPToSocks5(httpPort int, socks5Port int) {
-    l, err := net.Listen("tcp", fmt.Sprintf(":%d", httpPort))
+func HTTPToSocks5(httpAddr string, socks5Addr string) {
+    l, err := net.Listen("tcp", httpAddr)
     if err != nil {
         log.Panic(err)
     }
-    log.Printf("starting http proxy at port: %v", l.Addr())
+    log.Printf("本地HTTP Proxy地址: %v", l.Addr())
     for {
         client, err := l.Accept()
         if err != nil {
             log.Panic(err)
         }
 
-        go handleClientRequest(client, socks5Port)
+        go handleClientRequest(client, socks5Addr)
     }
 }
 
-func handleClientRequest(client net.Conn, socks5Port int) {
+func handleClientRequest(client net.Conn, socks5Addr string) {
     if client == nil {
         return
     }
@@ -193,14 +193,15 @@ func handleClientRequest(client net.Conn, socks5Port int) {
     data := b[:n]
     content := string(data)
     if !strings.HasPrefix(content, "CONNECT") {
-        log.Printf("not support: %v", data)
+        log.Printf("not support: %v", content)
         return
     }
+    log.Printf("http proxying: %v", content)
 
     var method, host, address string
     _, err = fmt.Sscanf(content, "%s%s", &method, &host)
     if err != nil {
-        log.Error(err)
+        log.Println(err)
         return
     }
     hostPortURL, err := url.Parse(host)
@@ -209,10 +210,10 @@ func handleClientRequest(client net.Conn, socks5Port int) {
         return
     }
 
-    if hostPortURL.Opaque == "443" { //https访问
+    if hostPortURL.Opaque == "443" { // https访问
         address = hostPortURL.Scheme + ":443"
-    } else { //http访问
-        if strings.Index(hostPortURL.Host, ":") == -1 { //host不带端口， 默认80
+    } else {                                            // http访问
+        if strings.Index(hostPortURL.Host, ":") == -1 { // host不带端口， 默认80
             address = hostPortURL.Host + ":80"
         } else {
             address = hostPortURL.Host
@@ -220,12 +221,12 @@ func handleClientRequest(client net.Conn, socks5Port int) {
     }
 
     // 连接本地socks5
-    dialer, err := proxy.SOCKS5("tcp", fmt.Sprintf("127.0.0.1:%d", socks5Port), nil, proxy.Direct)
+    dialer, err := proxy.SOCKS5("tcp", socks5Addr, nil, proxy.Direct)
     if err != nil {
         log.Println(err)
         return
     }
-    //server, err := net.Dial("tcp", address)
+    // server, err := net.Dial("tcp", address)
     server, err := dialer.Dial("tcp", address)
     if err != nil {
         log.Println(err)
@@ -236,7 +237,7 @@ func handleClientRequest(client net.Conn, socks5Port int) {
     } else {
         _, err = server.Write(data)
     }
-    //进行转发
+    // 进行转发
     go func() { _, _ = io.Copy(server, client) }()
     _, _ = io.Copy(client, server)
 }

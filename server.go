@@ -5,14 +5,14 @@ import (
     "crypto/tls"
     "encoding/binary"
     "fmt"
-    log "github.com/sirupsen/logrus"
+    "log"
     "net"
 )
 
 func handleFearlessRequest(conn net.Conn) {
     var (
-        err             error = nil
-        hasError              = false
+        err             error  = nil
+        hasError               = false
         readBytesCount  uint64 // 发送流量统计
         writeBytesCount uint64 // 接收流量统计
         addr            string // 连接远程的地址
@@ -20,12 +20,12 @@ func handleFearlessRequest(conn net.Conn) {
     )
     defer func() {
         if e := recover(); e != nil {
-            log.Error(e)
+            log.Println(e)
         }
-        log.Infof("连接统计(%v<=>%v): 发送: %v 接收: %v", localAddr, addr, bytesCount(readBytesCount), bytesCount(writeBytesCount))
+        log.Printf("连接统计(%v<=>%v): 发送: %v 接收: %v", localAddr, addr, bytesCount(readBytesCount), bytesCount(writeBytesCount))
     }()
     localAddr = conn.RemoteAddr().String()
-    //log.Printf("socks connect from %s\n", localAddr)
+    // log.Printf("socks connect from %s\n", localAddr)
     for {
         var _ int
         buf := make([]byte, 1)
@@ -49,7 +49,7 @@ func handleFearlessRequest(conn net.Conn) {
             sb := bytes.NewBuffer(buf[4:6])
             err = binary.Read(sb, binary.BigEndian, &port)
             if err != nil {
-                log.Errorf("%v\n", err)
+                log.Printf("%v\n", err)
                 break
             }
         } else if addrType == 3 {
@@ -70,7 +70,7 @@ func handleFearlessRequest(conn net.Conn) {
             sb = bytes.NewBuffer(buf[addrLen : addrLen+2])
             err = binary.Read(sb, binary.BigEndian, &port)
             if err != nil {
-                log.Errorf("%v\n", err)
+                log.Printf("%v\n", err)
                 break
             }
         } else {
@@ -113,13 +113,13 @@ func handleFearlessRequest(conn net.Conn) {
 
 }
 
-func RunServer(port int, ca, pem, key []byte) {
+func RunServer(addr string, ca, pem, key []byte) {
     /*
-    ln, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
-    if err != nil {
-        log.Println(err)
-        return
-    }
+       ln, err := net.Listen("tcp", fmt.Sprintf(":%d", addr))
+       if err != nil {
+           log.Println(err)
+           return
+       }
     */
 
     config, err := ReadServerTLS(ca, pem, key)
@@ -127,9 +127,10 @@ func RunServer(port int, ca, pem, key []byte) {
         log.Println(err)
         return
     }
-    ln, err := tls.Listen("tcp", fmt.Sprintf(":%d", port), config)
 
-    log.Printf("starting server at port %v ...\n", ln.Addr().String())
+    ln, err := tls.Listen("tcp", addr, config)
+
+    log.Printf("服务地址: %v ...\n", ln.Addr().String())
     for {
         conn, err := ln.Accept()
         if err != nil {
